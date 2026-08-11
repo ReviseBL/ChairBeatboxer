@@ -15,9 +15,18 @@ type Direction =
 type CardinalDirection = "up" | "down" | "left" | "right";
 type GameStatus = "menu" | "playing" | "gameover";
 type NoteBase = { id: number; bornAt: number; travelTime: number };
-type Note = NoteBase & ({ kind: "arrow"; direction: Direction } | { kind: "server" });
+type Note = NoteBase & (
+  | { kind: "arrow"; direction: Direction }
+  | { kind: "server" }
+  | { kind: "burger" }
+);
 type ScoreRow = { id: number; nickname: string; score: number; maxCombo: number };
-type WorkDrop = { id: number; kind: "laptop" | "docs" | "phone"; side: "left" | "right" };
+type WorkDrop = {
+  id: number;
+  kind: "laptop" | "docs" | "monitor" | "parts" | "keyboard";
+  side: "left" | "right";
+};
+type Visitor = { id: number; variant: "docs" | "hardware" };
 type LaneImpact = { id: number; type: "hit" | "perfect" | "miss"; label: string };
 
 const DIRECTION_META: Record<
@@ -51,7 +60,7 @@ const CARDINAL_ARROW_KEYS: Record<string, CardinalDirection> = {
   ArrowRight: "right",
 };
 const ARROW_CHORD_WINDOW = 105;
-const GAME_OVER_OVERLAY_DELAY = 1400;
+const GAME_OVER_OVERLAY_DELAY = 1800;
 const HIT_CENTER = 13;
 const HIT_WINDOW = 6.5;
 const STARTING_SPIN = 100;
@@ -199,7 +208,7 @@ export default function Home() {
   const [leaderboard, setLeaderboard] = useState<ScoreRow[]>([]);
   const [rankingState, setRankingState] = useState<"loading" | "ready" | "offline">("loading");
   const [workDrops, setWorkDrops] = useState<WorkDrop[]>([]);
-  const [visitor, setVisitor] = useState<{ id: number; side: "left" | "right" } | null>(null);
+  const [visitor, setVisitor] = useState<Visitor | null>(null);
   const [laneImpact, setLaneImpact] = useState<LaneImpact | null>(null);
   const [showGameOver, setShowGameOver] = useState(false);
 
@@ -207,7 +216,7 @@ export default function Home() {
   const notesRef = useRef<Note[]>([]);
   const startTimeRef = useRef(0);
   const nextSpawnRef = useRef(0);
-  const nextServerSpawnRef = useRef(0);
+  const nextHazardSpawnRef = useRef(0);
   const nextIdRef = useRef(1);
   const scoreRef = useRef(0);
   const comboRef = useRef(0);
@@ -318,7 +327,7 @@ export default function Home() {
     const now = performance.now();
     startTimeRef.current = now;
     nextSpawnRef.current = now + 850;
-    nextServerSpawnRef.current = now + 7_000;
+    nextHazardSpawnRef.current = now + 6_500;
     nextIdRef.current = 1;
     notesRef.current = [];
     scoreRef.current = 0;
@@ -364,12 +373,13 @@ export default function Home() {
 
       if (now >= nextSpawnRef.current) {
         const travelTime = Math.max(2050, 4300 - elapsed * 0.021);
-        const spawnServer = now >= nextServerSpawnRef.current;
-        const nextNote: Note = spawnServer
-          ? { id: nextIdRef.current++, kind: "server", bornAt: now, travelTime }
+        const spawnHazard = now >= nextHazardSpawnRef.current;
+        const hazardKind = Math.random() > 0.46 ? "burger" : "server";
+        const nextNote: Note = spawnHazard
+          ? { id: nextIdRef.current++, kind: hazardKind, bornAt: now, travelTime }
           : { id: nextIdRef.current++, kind: "arrow", direction: randomDirection(), bornAt: now, travelTime };
-        if (spawnServer) {
-          nextServerSpawnRef.current = now + 7_000 + Math.random() * 5_000;
+        if (spawnHazard) {
+          nextHazardSpawnRef.current = now + 6_500 + Math.random() * 4_500;
         }
         notesRef.current = [...notesRef.current, nextNote];
         setNotes(notesRef.current);
@@ -384,15 +394,18 @@ export default function Home() {
       if (expiredNotes.length > 0) {
         const expiredIds = new Set(expiredNotes.map((note) => note.id));
         const missedArrows = expiredNotes.filter((note) => note.kind === "arrow");
-        const dodgedServers = expiredNotes.filter((note) => note.kind === "server");
+        const dodgedHazards = expiredNotes.filter((note) => note.kind !== "arrow");
         notesRef.current = notesRef.current.filter((note) => !expiredIds.has(note.id));
         setNotes(notesRef.current);
-        if (dodgedServers.length > 0 && missedArrows.length === 0) {
-          const dodgeScore = dodgedServers.length * 75;
+        if (dodgedHazards.length > 0 && missedArrows.length === 0) {
+          const dodgeScore = dodgedHazards.reduce(
+            (total, note) => total + (note.kind === "burger" ? 110 : 75),
+            0,
+          );
           scoreRef.current += dodgeScore;
           setScore(scoreRef.current);
           setFeedback("DODGE!");
-          flashLane("hit", `SERVER OMINIĘTY +${dodgeScore}`);
+          flashLane("hit", `PRZESZKODA OMINIĘTA +${dodgeScore}`);
         }
         if (missedArrows.length > 0) {
           const damage = Math.min(44, missedArrows.length * 22);
@@ -409,20 +422,32 @@ export default function Home() {
 
   useEffect(() => {
     if (status !== "playing") return;
-    const timer = setInterval(() => {
-      const side = Math.random() > 0.5 ? "right" : "left";
+    const pendingTimers: number[] = [];
+    const sendVisitor = () => {
       const id = Date.now();
-      setVisitor({ id, side });
-      setTimeout(() => {
-        const kinds: WorkDrop["kind"][] = ["laptop", "docs", "phone"];
+      const variant: Visitor["variant"] = Math.random() > 0.48 ? "hardware" : "docs";
+      setVisitor({ id, variant });
+      pendingTimers.push(window.setTimeout(() => {
+        const kinds: WorkDrop["kind"][] = variant === "docs"
+          ? ["docs", "keyboard"]
+          : ["laptop", "monitor", "parts"];
         setWorkDrops((items) => [
-          ...items.slice(-5),
-          { id, side, kind: kinds[Math.floor(Math.random() * kinds.length)] },
+          ...items.slice(-7),
+          { id, side: "right", kind: kinds[Math.floor(Math.random() * kinds.length)] },
         ]);
-      }, 2100);
-      setTimeout(() => setVisitor((current) => (current?.id === id ? null : current)), 4700);
-    }, 7600);
-    return () => clearInterval(timer);
+      }, 3500));
+      pendingTimers.push(window.setTimeout(() => {
+        setVisitor((current) => (current?.id === id ? null : current));
+      }, 7400));
+    };
+    const firstVisitor = window.setTimeout(sendVisitor, 650);
+    const visitorInterval = window.setInterval(sendVisitor, 9000);
+    return () => {
+      window.clearTimeout(firstVisitor);
+      window.clearInterval(visitorInterval);
+      pendingTimers.forEach((timer) => window.clearTimeout(timer));
+      setVisitor(null);
+    };
   }, [status]);
 
   const hit = useCallback(
@@ -437,12 +462,14 @@ export default function Home() {
         .filter(({ x }) => Math.abs(x - HIT_CENTER) <= HIT_WINDOW)
         .sort((a, b) => Math.abs(a.x - HIT_CENTER) - Math.abs(b.x - HIT_CENTER))[0];
 
-      if (hittable?.note.kind === "server") {
+      if (hittable && hittable.note.kind !== "arrow") {
         notesRef.current = notesRef.current.filter((note) => note.id !== hittable.note.id);
         setNotes(notesRef.current);
-        setFeedback("SERVER HIT -20");
-        flashLane("miss", "SERWER! -20% SPIN");
-        changeSpinEnergy(-20);
+        const isBurger = hittable.note.kind === "burger";
+        const damage = isBurger ? 16 : 20;
+        setFeedback(isBurger ? "BURGER HIT!" : "SERVER HIT!");
+        flashLane("miss", `${isBurger ? "BURGER" : "SERWER"}! -${damage}% SPIN`);
+        changeSpinEnergy(-damage);
         return;
       }
 
@@ -554,6 +581,7 @@ export default function Home() {
   const bobSpeed = Math.round(Math.max(240, Math.min(680, spinPeriod / 4)));
   const spinFrame = isSpinning ? chairFrame : 0;
   const spinTone = spinEnergy > 55 ? "full" : spinEnergy > 27 ? "warning" : "danger";
+  const comboTier = combo >= 25 ? "legendary" : combo >= 15 ? "fire" : combo >= 8 ? "charged" : "none";
 
   return (
     <main className="game-shell" tabIndex={0}>
@@ -561,14 +589,26 @@ export default function Home() {
         <div className="arcade-frame">
           <div className="arcade-screws" aria-hidden="true"><i /><i /><i /><i /></div>
           <div className="game-stage">
-            <div className="carpet-grid" />
-            <div className="office-wall office-wall-left"><span>IT</span></div>
-            <div className="office-wall office-wall-back">
-              <div className="poster">KEEP<br />CALM<br /><b>REBOOT</b></div>
+            <Image
+              className="isometric-office-bg"
+              src="/assets/isometric-office-background.png"
+              alt="Izometryczne biuro pełne sprzętu komputerowego"
+              fill
+              priority
+              unoptimized
+            />
+            <div className="office-atmosphere" aria-hidden="true" />
+
+            <div className="terminal-screen-copy">
+              <span>NIECH MI TE KUR#$ Z KSIEGOWOSCI NIE ZMIENIAJA KONFIGURACJI</span>
+              <i aria-hidden="true">█</i>
+            </div>
+            <div className="tablet-screen-copy">
+              <span>Siema</span><b>Panie Arkadiuszu</b>
             </div>
 
             <div className="stage-brand brand-lockup">
-              <span className="brand-chip">16 BIT OFFICE RHYTHM • 8-WAY v1.7</span>
+              <span className="brand-chip">16 BIT ISO OFFICE • 8-WAY v2.3</span>
               <h1>CHAIR <em>BEATBOXER</em></h1>
             </div>
 
@@ -589,34 +629,21 @@ export default function Home() {
               </label>
             </div>
 
-            <div className="desk">
-              <div className="desk-top">
-                <div className="monitor apple-device">
-                  <div className="monitor-screen">
-                    <span className="terminal-message">niech mi te księgowe nie zmieniają konfiguracji<i aria-hidden="true">█</i></span>
-                  </div>
-                  <i className="apple-mark">●</i>
-                  <div className="monitor-neck" />
-                </div>
-                <div className="server-rack">
-                  <span className="rack-led green" /><span className="rack-led" />
-                  <div className="cd-slot"><div className="cd-tray"><i /></div></div>
-                  <small>SERVER_01</small>
-                </div>
-                <div className="tablet apple-device">
-                  <div className="tablet-screen"><b>ERROR</b><span>0xC0FFEE</span></div>
-                  <i className="tablet-dot" />
-                </div>
-                <div className="keyboard-device"><i /><i /><i /><i /><i /><i /></div>
-                {workDrops.map((drop, index) => (
-                  <div key={drop.id} className={`work-drop work-${drop.kind} work-pos-${index % 4}`}>
-                    {drop.kind === "laptop" && <><i /><span>LAPTOP</span></>}
-                    {drop.kind === "docs" && <><i /><b>!</b></>}
-                    {drop.kind === "phone" && <><i /><span>99+</span></>}
-                  </div>
-                ))}
-              </div>
-              <div className="desk-leg left" /><div className="desk-leg right" />
+            <div className="delivered-work" aria-label="Sprzęt i dokumenty dołożone przez pracowników">
+              {workDrops.map((drop, index) => (
+                <div
+                  key={drop.id}
+                  className={`work-drop work-${drop.kind} drop-from-${drop.side} work-pos-${index % 8}`}
+                  title={drop.kind === "docs" ? "Stos dokumentów" : "Dodatkowy sprzęt"}
+                />
+              ))}
+            </div>
+
+            <div className={`combo-fx combo-${comboTier}`} aria-hidden="true">
+              <div className="combo-ring ring-one" />
+              <div className="combo-ring ring-two" />
+              <div className="combo-particles">{Array.from({ length: 14 }, (_, index) => <i key={index} />)}</div>
+              {comboTier !== "none" && <strong>{combo >= 25 ? "MAXIMUM FLOW" : combo >= 15 ? "HOT STREAK" : "COMBO CHARGE"}</strong>}
             </div>
 
             <div
@@ -652,6 +679,8 @@ export default function Home() {
                 unoptimized
               />
               <div className="chair-crash-debris" aria-hidden="true"><i /><i /><i /><i /></div>
+              <div className="chair-crash-wave" aria-hidden="true" />
+              <div className="chair-crash-dust" aria-hidden="true"><i /><i /><i /></div>
               {feedback !== "WEEE!" && <div className="speech-burst" key={`${feedback}-${combo}`}>{feedback}</div>}
               {feedback === "WEEE!" && (
                 <div className="combo-celebration" key={`combo-${combo}`}>Łiiiiiiiiiii!</div>
@@ -674,15 +703,11 @@ export default function Home() {
               <strong>{Math.round(spinEnergy)}%</strong>
             </div>
 
-            <div className="cabinet cabinet-one"><i /><i /><b>OPS</b></div>
-            <div className="cabinet cabinet-two"><i /><i /><b>GEAR</b></div>
-            <div className="floor-cable"><i /><i /><i /></div>
-
             {visitor && (
-              <div className={`visitor visitor-${visitor.side}`}>
-                <div className="visitor-head" />
-                <div className="visitor-body"><span>+1<br />TASK</span></div>
-                <div className="visitor-legs"><i /><i /></div>
+              <div className={`visitor visitor-right visitor-${visitor.variant}`}>
+                <div className="visitor-shadow" aria-hidden="true" />
+                <div className="visitor-sprite" role="img" aria-label={visitor.variant === "docs" ? "Pracownik przynosi dokumenty" : "Pracowniczka przynosi sprzęt"} />
+                <span className="visitor-task">+1 ROBOTA</span>
               </div>
             )}
 
@@ -710,26 +735,38 @@ export default function Home() {
             <div className="rhythm-lane" aria-label="Tor rytmiczny">
               <div className={`hit-zone ${laneImpact ? `zone-${laneImpact.type}` : ""}`} key={laneImpact ? `zone-${laneImpact.id}` : "zone-idle"}><span>HIT</span></div>
               <div className="lane-lines"><i /><i /><i /></div>
-              {notePositions.map((note) => note.kind === "server" ? (
-                <div
-                  key={note.id}
-                  className="rhythm-note note-server"
-                  style={{ left: `${note.x}%` }}
-                  aria-label="Przeszkoda: serwer — nie naciskaj strzałki"
-                >
-                  <Image src="/assets/server-obstacle.png" alt="" width={96} height={96} unoptimized />
-                  <b>OMIŃ</b>
-                </div>
-              ) : (
-                <div
-                  key={note.id}
-                  className={`rhythm-note note-${note.direction}`}
-                  style={{ left: `${note.x}%` }}
-                  aria-label={`Strzałka ${DIRECTION_META[note.direction].label}`}
-                >
-                  {DIRECTION_META[note.direction].symbol}
-                </div>
-              ))}
+              {notePositions.map((note) => {
+                if (note.kind !== "arrow") {
+                  const isBurger = note.kind === "burger";
+                  return (
+                    <div
+                      key={note.id}
+                      className={`rhythm-note ${isBurger ? "note-burger" : "note-server"}`}
+                      style={{ left: `${note.x}%` }}
+                      aria-label={`Przeszkoda: ${isBurger ? "burger" : "serwer"} — nie naciskaj strzałki`}
+                    >
+                      <Image
+                        src={isBurger ? "/assets/burger-obstacle.png" : "/assets/server-obstacle.png"}
+                        alt=""
+                        width={96}
+                        height={96}
+                        unoptimized
+                      />
+                      <b>OMIŃ</b>
+                    </div>
+                  );
+                }
+                return (
+                  <div
+                    key={note.id}
+                    className={`rhythm-note note-${note.direction}`}
+                    style={{ left: `${note.x}%` }}
+                    aria-label={`Strzałka ${DIRECTION_META[note.direction].label}`}
+                  >
+                    {DIRECTION_META[note.direction].symbol}
+                  </div>
+                );
+              })}
               {laneImpact && (
                 <div className={`lane-impact impact-${laneImpact.type}`} key={`impact-${laneImpact.id}`}>
                   <i /><i /><i /><i />
@@ -763,7 +800,7 @@ export default function Home() {
                   <p className="menu-intro">Trafiaj strzałki w ośmiu kierunkach, podkręcaj combo i utrzymuj fotel w ruchu. Im więcej energii, tym szybszy obrót.</p>
                   <div className="menu-rules">
                     <div><b>8 KIERUNKÓW</b><span>Skosy: dwie strzałki naraz lub Q / E / Z / C.</span></div>
-                    <div className="rule-danger"><b>SERWER</b><span>Nie naciskaj nic — pozwól mu przejechać.</span></div>
+                    <div className="rule-danger"><b>SERWER + BURGER</b><span>Nie naciskaj nic — obie przeszkody muszą przejechać.</span></div>
                   </div>
                   <label className="menu-field">
                     <span>TWÓJ NICK</span>
@@ -817,7 +854,7 @@ export default function Home() {
               </div>
             )}
           </div>
-          <footer className="cabinet-labels"><span>CHAIR.OS v1.7 • CRASH REPLAY + ARROW CHORDS</span><span>DODGE THE SERVER</span></footer>
+          <footer className="cabinet-labels"><span>CHAIR.OS v2.3 • RIGHT-SIDE CREW</span><span>DODGE SERVER + BURGER</span></footer>
         </div>
       </section>
     </main>
