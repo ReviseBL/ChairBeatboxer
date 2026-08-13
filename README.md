@@ -98,6 +98,17 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
+## Cloudflare Workers Builds
+
+The production build detects Cloudflare Workers Builds through `WORKERS_CI=1`
+and emits a provisionable `DB` binding instead of the local Sites placeholder.
+Wrangler can therefore create or retain the D1 database automatically during
+deployment. The scores API creates the `scores` table on first use, so a fresh
+deployment does not require a separate migration command.
+
+To attach an existing D1 database instead, set the build variable
+`CLOUDFLARE_D1_DATABASE_ID` to that database's ID before rebuilding.
+
 Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
 
 The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
