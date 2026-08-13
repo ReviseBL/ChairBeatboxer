@@ -4,6 +4,19 @@ import { scores } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
+function describeRankingError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error("[scores] D1 request failed", error);
+
+  if (message.includes("binding") || message.includes("DB")) {
+    return "database binding unavailable";
+  }
+  if (message.includes("no such table")) {
+    return "scores table unavailable";
+  }
+  return "database request failed";
+}
+
 export async function GET() {
   try {
     const db = await getDb();
@@ -13,8 +26,11 @@ export async function GET() {
       .orderBy(desc(scores.score), desc(scores.maxCombo), desc(scores.id))
       .limit(10);
     return Response.json({ scores: rows });
-  } catch {
-    return Response.json({ error: "ranking unavailable" }, { status: 503 });
+  } catch (error) {
+    return Response.json(
+      { error: "ranking unavailable", reason: describeRankingError(error) },
+      { status: 503 }
+    );
   }
 }
 
@@ -30,7 +46,10 @@ export async function POST(request: Request) {
     const db = await getDb();
     const [row] = await db.insert(scores).values({ nickname, score, maxCombo }).returning();
     return Response.json({ score: row }, { status: 201 });
-  } catch {
-    return Response.json({ error: "score could not be saved" }, { status: 503 });
+  } catch (error) {
+    return Response.json(
+      { error: "score could not be saved", reason: describeRankingError(error) },
+      { status: 503 }
+    );
   }
 }

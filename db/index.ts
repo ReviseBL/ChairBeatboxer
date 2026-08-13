@@ -11,15 +11,15 @@ export async function getDb() {
     );
   }
 
-  schemaReady ??= env.DB.exec(`
+  schemaReady ??= env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS scores (
       id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
       nickname TEXT NOT NULL,
       score INTEGER NOT NULL,
       max_combo INTEGER DEFAULT 0 NOT NULL,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL
-    );
-  `).then(() => undefined);
+    )
+  `).run().then(() => undefined);
 
   try {
     await schemaReady;
