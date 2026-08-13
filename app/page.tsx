@@ -528,6 +528,8 @@ export default function Home() {
     };
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (statusRef.current !== "playing") return;
+
       const cardinal = CARDINAL_ARROW_KEYS[event.key] ?? CARDINAL_ARROW_KEYS[event.code];
       if (cardinal) {
         event.preventDefault();
